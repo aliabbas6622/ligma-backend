@@ -100,6 +100,10 @@ async function buildAll() {
       "puppeteer",
       "puppeteer-core",
       "electron",
+      "@ligma/db",
+      "@ligma/api-zod",
+      "@workspace/db",
+      "@workspace/api-zod",
     ],
     sourcemap: "linked",
     plugins: [
