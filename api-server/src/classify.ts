@@ -29,8 +29,13 @@ export function classifyByKeyword(text: string): Classification {
 }
 
 export async function classifyByAI(text: string): Promise<Classification> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return classifyByKeyword(text);
+  const groqModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+  const groqKeys = [process.env.GROQ_1, process.env.GROQ_2].filter(Boolean) as string[];
+  const orModel = process.env.OPENROUTER_MODEL || 'minimax/minimax-m2.5:free';
+  const orKeys = [process.env.OPENROUTER_1, process.env.OPENROUTER_2].filter(Boolean) as string[];
+  const geminiKey = process.env.GEMINI_API_KEY;
+
+  if (!groqKeys.length && !orKeys.length && !geminiKey) return classifyByKeyword(text);
 
   const prompt = `Classify the following note from a brainstorm whiteboard into exactly one of these intent types:
 - action_item: a task, to-do, or someone needs to do something
@@ -42,27 +47,89 @@ Respond with ONLY one word: action_item | decision | open_question | reference.
 
 Note: """${text.slice(0, 500)}"""`;
 
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 8 },
-      }),
-    });
-    if (!res.ok) {
-      return classifyByKeyword(text);
+  const valid: IntentType[] = ['action_item', 'decision', 'open_question', 'reference'];
+
+  // Try Groq first
+  for (const apiKey of groqKeys) {
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: groqModel,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0,
+          max_tokens: 16,
+        }),
+      });
+
+      if (res.ok) {
+        const data: any = await res.json();
+        const out = (data?.choices?.[0]?.message?.content || '').trim().toLowerCase();
+        if (valid.includes(out as IntentType)) {
+          return { intent: out as IntentType, confidence: 0.95, source: 'ai' };
+        }
+      }
+    } catch {
+      // Ignore and try next key
     }
-    const data: any = await res.json();
-    const out = (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toLowerCase();
-    const valid: IntentType[] = ['action_item', 'decision', 'open_question', 'reference'];
-    if (valid.includes(out as IntentType)) {
-      return { intent: out as IntentType, confidence: 0.95, source: 'ai' };
-    }
-    return classifyByKeyword(text);
-  } catch {
-    return classifyByKeyword(text);
   }
+
+  // Try OpenRouter next
+  for (const apiKey of orKeys) {
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          'HTTP-Referer': 'https://ligma.zip',
+          'X-Title': 'Ligma Whiteboard',
+        },
+        body: JSON.stringify({
+          model: orModel,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+
+      if (res.ok) {
+        const data: any = await res.json();
+        const out = (data?.choices?.[0]?.message?.content || '').trim().toLowerCase();
+        if (valid.includes(out as IntentType)) {
+          return { intent: out as IntentType, confidence: 0.95, source: 'ai' };
+        }
+      }
+    } catch {
+      // Ignore and try next key
+    }
+  }
+
+  // Fallback to Gemini
+  if (geminiKey) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 8 },
+        }),
+      });
+      if (res.ok) {
+        const data: any = await res.json();
+        const out = (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toLowerCase();
+        if (valid.includes(out as IntentType)) {
+          return { intent: out as IntentType, confidence: 0.95, source: 'ai' };
+        }
+      }
+    } catch {
+      // Ignore and fall back to keyword
+    }
+  }
+
+  return classifyByKeyword(text);
 }

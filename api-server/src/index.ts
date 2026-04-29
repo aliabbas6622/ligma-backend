@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { getRoom, type ClientConn } from './sessionRoom.js';
+import { ensureCoreSchema } from '@ligma/db';
 
 const rawPort = process.env['PORT'];
 
@@ -37,7 +38,6 @@ wss.on('connection', (ws: WebSocket, req) => {
     userName: 'Unknown',
     role: 'Viewer',
     color: '#3b82f6',
-    awarenessClientId: Math.floor(Math.random() * 0xffffffff),
   };
 
   room.attach(conn);
@@ -57,6 +57,12 @@ wss.on('connection', (ws: WebSocket, req) => {
     room.detach(conn);
   });
 });
+
+try {
+  await ensureCoreSchema();
+} catch (err) {
+  logger.error({ err }, 'Database bootstrap failed; using in-memory event/task fallback');
+}
 
 server.listen(port, () => {
   logger.info({ port }, 'LIGMA server listening (HTTP + WebSocket)');

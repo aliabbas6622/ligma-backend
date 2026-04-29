@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { pool } from '@workspace/db';
-import { classifyByAI, classifyByKeyword } from '../classify.js';
+import { pool } from '@ligma/db';
+import { classifyByAI } from '../classify.js';
 import { generateSummary } from '../summary.js';
 import { getRoom } from '../sessionRoom.js';
 import type { Role } from '../rbac.js';
 import { logger } from '../lib/logger.js';
+import { listMemoryEvents, listMemoryTasks, replayMemoryEvents } from '../memoryStore.js';
 
 const router = Router();
 
@@ -104,7 +105,8 @@ router.get('/events/:sessionId', async (req, res) => {
     res.json(r.rows);
   } catch (err) {
     logger.error({ err, sessionId: req.params['sessionId'] }, 'Error in /events');
-    res.json([]);
+    const limit = Math.min(parseInt((req.query['limit'] as string) || '500', 10), 2000);
+    res.json(listMemoryEvents(req.params['sessionId']!, limit));
   }
 });
 
@@ -125,7 +127,7 @@ router.get('/tasks/:sessionId', async (req, res) => {
     res.json(r.rows);
   } catch (err) {
     logger.error({ err, sessionId: req.params['sessionId'] }, 'Error in /tasks');
-    res.json([]);
+    res.json(listMemoryTasks(req.params['sessionId']!));
   }
 });
 
@@ -144,7 +146,8 @@ router.get('/replay/:sessionId', async (req, res) => {
     res.json({ events: r.rows });
   } catch (err) {
     logger.error({ err, sessionId: req.params['sessionId'], seq: req.query['seq'] }, 'Error in /replay');
-    res.json({ events: [] });
+    const seq = parseInt((req.query['seq'] as string) || '999999999', 10);
+    res.json({ events: replayMemoryEvents(req.params['sessionId']!, seq) });
   }
 });
 

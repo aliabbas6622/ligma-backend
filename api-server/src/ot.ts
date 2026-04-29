@@ -14,7 +14,7 @@
  *   add                    │ noop* │ noop   │ noop   │ noop
  *   update                 │ noop  │ merge  │ drop   │ drop if violates
  *   delete                 │ noop  │ noop   │ drop   │ noop
- *   lock                   │ noop  │ noop   │ drop   │ merge (last-writer)
+ *   lock                   │ noop  │ noop   │ drop   │ server order
  *
  * *add vs add: UUIDs are unique so this never conflicts.
  */
@@ -46,7 +46,7 @@ export interface Op {
   userId: string;
   baseRevision: number; // revision the client was at when this op was created
   payload: NodeFields;
-  timestamp: number;    // client wall-clock (ms) — used for last-write-wins on conflicting scalar fields
+  timestamp: number;    // client wall-clock (ms) for audit/display; ordering is server-authoritative
 }
 
 export interface CommittedOp extends Op {
@@ -76,35 +76,26 @@ export function transformOne(incoming: Op, committed: CommittedOp): Op | null {
 
         case 'update_node': {
           // Both sides updated the same node concurrently.
-          // Strategy: last-write-wins per scalar field (using wall-clock timestamp).
-          // If committed is newer, drop the fields it already changed; keep ours.
-          if (committed.timestamp >= incoming.timestamp) {
-            // Committed version is equal or newer: remove the fields it covers,
-            // keeping only fields the committed op didn't touch.
-            const merged = { ...incoming.payload };
-            for (const key of Object.keys(committed.payload) as Array<keyof NodeFields>) {
-              // Position and size: last-writer-wins — if committed is newer, drop ours.
-              if (key === 'x' || key === 'y' || key === 'w' || key === 'h') {
-                delete merged[key];
-              }
-              // Text: keep the longer version (optimistic merge — preserves more work).
-              if (key === 'text') {
-                const committedText = committed.payload.text ?? '';
-                const incomingText = merged.text ?? '';
-                merged.text = incomingText.length >= committedText.length
-                  ? incomingText
-                  : committedText;
-              }
+          // Strategy: field-level merge. Independent fields survive. If both
+          // ops touch the same scalar field, the already committed server op
+          // owns that field so clients converge without trusting wall clocks.
+          const merged = { ...incoming.payload };
+          for (const key of Object.keys(committed.payload) as Array<keyof NodeFields>) {
+            if (key === 'text') {
+              const committedText = committed.payload.text ?? '';
+              const incomingText = merged.text ?? '';
+              merged.text = incomingText.length >= committedText.length
+                ? incomingText
+                : committedText;
+              continue;
             }
-            // If nothing is left to update, drop the op.
-            const remaining = Object.keys(merged).filter(
-              (k) => k !== 'updatedAt' && merged[k as keyof NodeFields] !== undefined
-            );
-            if (remaining.length === 0) return null;
-            return { ...incoming, payload: merged };
+            delete merged[key];
           }
-          // Incoming is newer: keep as-is — it wins.
-          return incoming;
+          const remaining = Object.keys(merged).filter(
+            (k) => k !== 'updatedAt' && merged[k as keyof NodeFields] !== undefined,
+          );
+          if (remaining.length === 0) return null;
+          return { ...incoming, payload: merged };
         }
 
         default:
@@ -128,8 +119,8 @@ export function transformOne(incoming: Op, committed: CommittedOp): Op | null {
           // Node gone — drop lock op.
           return null;
         case 'lock_node':
-          // Concurrent lock changes: last-writer-wins.
-          return committed.timestamp >= incoming.timestamp ? null : incoming;
+          // Concurrent lock changes: the server's commit order is the authority.
+          return null;
         default:
           return incoming;
       }

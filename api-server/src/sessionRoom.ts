@@ -15,7 +15,8 @@ import { canEditNode, canCreateNode, canDeleteNode, canChangeLock, type Role } f
 import { logEvent } from './logEvent.js';
 import { classifyByKeyword, classifyByAI } from './classify.js';
 import { transform, applyOp, type Op, type CommittedOp, type NodeFields } from './ot.js';
-import { pool } from '@workspace/db';
+import { pool } from '@ligma/db';
+import { upsertMemoryTask } from './memoryStore.js';
 
 export interface ClientConn {
   ws: WebSocket;
@@ -272,7 +273,17 @@ export class SessionRoom {
          SET title = EXCLUDED.title, intent_type = EXCLUDED.intent_type,
              confirmed_by_ai = EXCLUDED.confirmed_by_ai, updated_at = NOW()`,
       [this.sessionId, nodeId, userId, title.slice(0, 500), intentType, confirmedByAi],
-    ).catch((err) => { console.error('[SessionRoom] Failed to upsertTask:', err); });
+    ).catch((err) => {
+      console.error('[SessionRoom] Failed to upsertTask, using in-memory task board:', err);
+      upsertMemoryTask({
+        sessionId: this.sessionId,
+        nodeId,
+        authorId: userId,
+        title: title.slice(0, 500),
+        intentType,
+        confirmedByAi,
+      });
+    });
   }
 
   // ── Admin role push ───────────────────────────────────────────────────────
