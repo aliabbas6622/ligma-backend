@@ -1,0 +1,14 @@
+{
+  "name": "ligma-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm run --filter @ligma/api-server build",
+    "dev": "pnpm run --filter @ligma/api-server dev",
+    "start": "pnpm run --filter @ligma/api-server start",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2"
+  }
+}
